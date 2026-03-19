@@ -14,6 +14,7 @@ Architecture:
 import json
 import os
 import streamlit as st
+import streamlit.components.v1 as components
 from utils.skill_extractor import extract_skills
 from utils.gap_analyzer import (
     analyze_gap,
@@ -30,6 +31,34 @@ st.set_page_config(
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded",
+)
+
+# ── Force Sidebar Expanded (override browser cache) ─────────────────
+components.html(
+    """
+    <script>
+        // Force sidebar to expanded state on load
+        function expandSidebar() {
+            const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+            if (sidebar && sidebar.getAttribute('aria-expanded') === 'false') {
+                sidebar.setAttribute('aria-expanded', 'true');
+                sidebar.style.width = '21rem';
+                sidebar.style.minWidth = '21rem';
+                sidebar.style.transform = 'none';
+            }
+            // Also click the expand button if sidebar is collapsed
+            const expandBtn = window.parent.document.querySelector('[data-testid="collapsedControl"]');
+            if (expandBtn) {
+                expandBtn.click();
+            }
+        }
+        // Run immediately and after a short delay (for slow renders)
+        expandSidebar();
+        setTimeout(expandSidebar, 300);
+        setTimeout(expandSidebar, 800);
+    </script>
+    """,
+    height=0,
 )
 
 # ── Load Dataset ────────────────────────────────────────────────────
