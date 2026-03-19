@@ -1,0 +1,297 @@
+{
+  "roles": [
+    {
+      "title": "Software Engineer",
+      "skills": [
+        "Data Structures",
+        "Algorithms",
+        "Python",
+        "Java",
+        "OOP",
+        "Operating Systems",
+        "DBMS",
+        "Computer Networks",
+        "Git",
+        "REST APIs",
+        "System Design",
+        "SQL"
+      ]
+    },
+    {
+      "title": "Data Scientist",
+      "skills": [
+        "Python",
+        "Machine Learning",
+        "Statistics",
+        "Pandas",
+        "NumPy",
+        "Data Visualization",
+        "SQL",
+        "Deep Learning",
+        "Scikit-learn",
+        "Jupyter"
+      ]
+    },
+    {
+      "title": "Data Analyst",
+      "skills": [
+        "SQL",
+        "Excel",
+        "Python",
+        "Data Visualization",
+        "Tableau",
+        "Statistics",
+        "Power BI",
+        "Pandas",
+        "Data Cleaning"
+      ]
+    },
+    {
+      "title": "Machine Learning Engineer",
+      "skills": [
+        "Python",
+        "TensorFlow",
+        "PyTorch",
+        "Machine Learning",
+        "Deep Learning",
+        "MLOps",
+        "Docker",
+        "Mathematics",
+        "Data Structures",
+        "Scikit-learn"
+      ]
+    },
+    {
+      "title": "Backend Developer",
+      "skills": [
+        "Python",
+        "Node.js",
+        "SQL",
+        "REST APIs",
+        "Docker",
+        "Git",
+        "Database Design",
+        "Authentication",
+        "OOP",
+        "Linux"
+      ]
+    },
+    {
+      "title": "Frontend Developer",
+      "skills": [
+        "HTML",
+        "CSS",
+        "JavaScript",
+        "React",
+        "TypeScript",
+        "Responsive Design",
+        "Git",
+        "Webpack",
+        "DOM",
+        "Tailwind CSS"
+      ]
+    },
+    {
+      "title": "Full Stack Developer",
+      "skills": [
+        "HTML",
+        "CSS",
+        "JavaScript",
+        "React",
+        "Node.js",
+        "SQL",
+        "REST APIs",
+        "Git",
+        "Docker",
+        "MongoDB"
+      ]
+    },
+    {
+      "title": "DevOps Engineer",
+      "skills": [
+        "Docker",
+        "Kubernetes",
+        "CI/CD",
+        "Linux",
+        "AWS",
+        "Terraform",
+        "Monitoring",
+        "Shell Scripting",
+        "Git",
+        "Ansible"
+      ]
+    },
+    {
+      "title": "Cloud Engineer",
+      "skills": [
+        "AWS",
+        "Azure",
+        "GCP",
+        "Terraform",
+        "Docker",
+        "Networking",
+        "Linux",
+        "Security",
+        "Kubernetes",
+        "IAM"
+      ]
+    },
+    {
+      "title": "Cybersecurity Analyst",
+      "skills": [
+        "Network Security",
+        "SIEM",
+        "Penetration Testing",
+        "Firewalls",
+        "Linux",
+        "Incident Response",
+        "Cryptography",
+        "OWASP",
+        "Vulnerability Assessment"
+      ]
+    },
+    {
+      "title": "AI Engineer",
+      "skills": [
+        "Python",
+        "Deep Learning",
+        "NLP",
+        "Computer Vision",
+        "TensorFlow",
+        "PyTorch",
+        "MLOps",
+        "Mathematics",
+        "LLMs",
+        "Transformers"
+      ]
+    },
+    {
+      "title": "Mobile App Developer",
+      "skills": [
+        "React Native",
+        "Flutter",
+        "Swift",
+        "Kotlin",
+        "REST APIs",
+        "Git",
+        "UI Design",
+        "Firebase",
+        "SQLite",
+        "App Store Deployment"
+      ]
+    },
+    {
+      "title": "QA Engineer",
+      "skills": [
+        "Selenium",
+        "Test Planning",
+        "Automation Testing",
+        "JIRA",
+        "Python",
+        "API Testing",
+        "CI/CD",
+        "Performance Testing",
+        "Manual Testing"
+      ]
+    },
+    {
+      "title": "Database Administrator",
+      "skills": [
+        "SQL",
+        "PostgreSQL",
+        "MySQL",
+        "Database Design",
+        "Performance Tuning",
+        "Backup & Recovery",
+        "Linux",
+        "Replication",
+        "Indexing"
+      ]
+    },
+    {
+      "title": "System Administrator",
+      "skills": [
+        "Linux",
+        "Windows Server",
+        "Networking",
+        "Shell Scripting",
+        "Active Directory",
+        "Virtualization",
+        "Monitoring",
+        "DNS",
+        "DHCP"
+      ]
+    },
+    {
+      "title": "Product Manager",
+      "skills": [
+        "Product Strategy",
+        "Agile",
+        "User Research",
+        "Roadmap Planning",
+        "Data Analysis",
+        "Communication",
+        "JIRA",
+        "A/B Testing",
+        "Stakeholder Management"
+      ]
+    },
+    {
+      "title": "Business Analyst",
+      "skills": [
+        "Requirements Gathering",
+        "SQL",
+        "Data Analysis",
+        "Process Modeling",
+        "Communication",
+        "Excel",
+        "JIRA",
+        "UML",
+        "Wireframing"
+      ]
+    },
+    {
+      "title": "UI/UX Designer",
+      "skills": [
+        "Figma",
+        "User Research",
+        "Wireframing",
+        "Prototyping",
+        "Visual Design",
+        "Usability Testing",
+        "Adobe XD",
+        "Design Thinking",
+        "Information Architecture"
+      ]
+    },
+    {
+      "title": "Game Developer",
+      "skills": [
+        "C++",
+        "Unity",
+        "Unreal Engine",
+        "3D Mathematics",
+        "Game Physics",
+        "C#",
+        "Git",
+        "Shader Programming",
+        "Game Design"
+      ]
+    },
+    {
+      "title": "Embedded Systems Engineer",
+      "skills": [
+        "C",
+        "C++",
+        "RTOS",
+        "Microcontrollers",
+        "Circuit Design",
+        "Embedded Linux",
+        "Debugging",
+        "Assembly",
+        "I2C",
+        "SPI"
+      ]
+    }
+  ]
+}
