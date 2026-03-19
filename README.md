@@ -2,7 +2,7 @@
 
 ## Candidate Details
 
-* **Candidate Name:** Ashish Soni
+* **Candidate Name:** Ashish 
 * **Scenario Chosen:** Skill-Bridge Career Navigator
 * **Estimated Time Spent:** ~5 hours
 
