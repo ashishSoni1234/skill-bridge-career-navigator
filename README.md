@@ -14,6 +14,11 @@ Paste your resume or enter your skills → select a target role → get instant 
 
 ---
 
+## 📄 Technical Documentation
+Please find the detailed system architecture, core flows, integration details, and design decisions in the [Technical Documentation](./TECHNICAL_DOCUMENTATION.md).
+
+---
+
 ## ✨ Features
 
 | Feature                | Description                                         |
