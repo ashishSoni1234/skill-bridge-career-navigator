@@ -297,35 +297,134 @@ def _filter_and_deduplicate(raw_skills: list[str], all_known_skills: list[str]) 
 
 
 # ═══════════════════════════════════════════════════════════════════
-# AI EXTRACTION (PRIMARY)
+# JSON CLEANUP UTILITIES
 # ═══════════════════════════════════════════════════════════════════
 
-def extract_skills_ai(text: str) -> list[str]:
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 1
+
+
+def _clean_json_response(response_text: str) -> str:
     """
-    PRIMARY: AI-based skill extraction using LLaMA 3.1 via Groq.
+    Attempt to clean/repair a potentially malformed JSON response from AI.
 
-    Sends user's text to Groq and asks LLaMA to extract ONLY
-    technical/professional skills. Returns raw list (pre-filtering).
-
-    Raises an exception on failure so the caller can fall back.
+    Steps:
+      1. Strip leading/trailing whitespace
+      2. Remove markdown code fences (```json ... ```)
+      3. Extract JSON substring (first [ ... last ])
+      4. Fix trailing commas before ] or }
+      5. Remove non-printable characters
     """
-    from groq import Groq
+    text = response_text.strip()
 
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key or api_key == "your_groq_api_key_here":
-        raise ValueError("GROQ_API_KEY is not configured properly.")
+    # Remove markdown code fences
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
 
-    client = Groq(api_key=api_key)
+    # Try to extract JSON array substring
+    bracket_start = text.find("[")
+    bracket_end = text.rfind("]")
+    if bracket_start != -1 and bracket_end != -1 and bracket_end > bracket_start:
+        text = text[bracket_start:bracket_end + 1]
 
+    # Fix trailing commas (e.g., ["Python", "Java",] → ["Python", "Java"])
+    text = re.sub(r",\s*]", "]", text)
+    text = re.sub(r",\s*}", "}", text)
+
+    # Remove non-printable characters (except newlines/tabs)
+    text = re.sub(r"[^\x20-\x7E\n\t]", "", text)
+
+    return text
+
+
+def _parse_json_safe(response_text: str) -> list:
+    """
+    Attempt to parse AI response as JSON with multiple cleanup strategies.
+
+    Returns parsed list on success, raises ValueError on complete failure.
+    """
+    raw = response_text.strip()
+    logger.info(f"[AI Response] (first 200 chars): {raw[:200]}")
+
+    # Strategy 1: Direct parse
+    try:
+        result = json.loads(raw)
+        if isinstance(result, list):
+            logger.info("[Parse] Strategy 1 (direct) succeeded.")
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Clean and parse
+    cleaned = _clean_json_response(raw)
+    try:
+        result = json.loads(cleaned)
+        if isinstance(result, list):
+            logger.info("[Parse] Strategy 2 (cleaned) succeeded.")
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 3: Try to find a JSON array anywhere in the text
+    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    if match:
+        try:
+            result = json.loads(match.group())
+            if isinstance(result, list):
+                logger.info("[Parse] Strategy 3 (regex extract) succeeded.")
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 4: Split by lines/commas and extract skill-like strings
+    partial_skills = _extract_partial_skills(raw)
+    if partial_skills:
+        logger.info(f"[Parse] Strategy 4 (partial recovery) extracted {len(partial_skills)} skills.")
+        return partial_skills
+
+    raise ValueError(f"Could not parse AI response after all cleanup strategies.")
+
+
+def _extract_partial_skills(text: str) -> list[str]:
+    """
+    Last-resort: try to extract skill-like strings from a malformed response.
+    Looks for quoted strings that look like skill names.
+    """
+    # Find all quoted strings
+    matches = re.findall(r'"([^"]{1,50})"', text)
+    if matches:
+        # Filter to only skill-like entries
+        skills = [m.strip() for m in matches if m.strip() and len(m.strip()) <= 50]
+        return skills
+    return []
+
+
+# ═══════════════════════════════════════════════════════════════════
+# AI EXTRACTION (PRIMARY) — with retry + robust parsing
+# ═══════════════════════════════════════════════════════════════════
+
+def _call_groq_skill_extraction(client, text: str) -> str:
+    """
+    Make a single API call to Groq for skill extraction.
+    Returns the raw response text.
+    """
     prompt = (
         "Extract ONLY technical and professional skills from the following text.\n"
         "Rules:\n"
-        "- Return ONLY a JSON array of skill name strings\n"
+        "- Return ONLY a valid JSON array of skill name strings\n"
         "- Include: programming languages, frameworks, tools, technologies, methodologies\n"
         "- EXCLUDE: person names, company names, university names, email addresses, "
         "job titles, dates, locations, sentences, descriptions\n"
         "- Keep skill names short (1-3 words max)\n"
-        "- No duplicates\n\n"
+        "- No duplicates\n"
+        "- Return ONLY valid JSON. No explanation. No text. No markdown.\n\n"
         f"Text:\n{text}"
     )
 
@@ -336,7 +435,8 @@ def extract_skills_ai(text: str) -> list[str]:
                 "content": (
                     "You are a skill extraction assistant. "
                     "Return ONLY a valid JSON array of technical skill strings. "
-                    "No markdown, no explanation, no code fences."
+                    "No markdown, no explanation, no code fences. "
+                    "Example output: [\"Python\", \"Docker\", \"SQL\"]"
                 ),
             },
             {"role": "user", "content": prompt},
@@ -346,19 +446,92 @@ def extract_skills_ai(text: str) -> list[str]:
         max_tokens=1024,
     )
 
-    response_text = chat_completion.choices[0].message.content.strip()
+    return chat_completion.choices[0].message.content.strip()
 
-    # Clean markdown code fences if present
-    if response_text.startswith("```"):
-        response_text = re.sub(r"^```(?:json)?\s*", "", response_text)
-        response_text = re.sub(r"\s*```$", "", response_text)
 
-    skills = json.loads(response_text)
+def extract_skills_ai(text: str) -> list[str]:
+    """
+    PRIMARY: AI-based skill extraction using LLaMA 3.1 via Groq.
 
-    if not isinstance(skills, list):
-        raise ValueError("LLaMA 3 did not return a valid list.")
+    Features:
+      - 3 retry attempts before giving up
+      - Robust JSON cleanup and parsing
+      - Partial result recovery from malformed responses
+      - Detailed logging for debugging
 
-    return [str(s).strip() for s in skills if str(s).strip()]
+    Raises an exception ONLY on critical failures (network, auth).
+    """
+    from groq import Groq
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key or api_key == "your_groq_api_key_here":
+        raise ValueError("GROQ_API_KEY is not configured properly.")
+
+    client = Groq(api_key=api_key)
+
+    last_error = None
+    last_response = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            logger.info(f"[Skill Extraction] Attempt {attempt}/{MAX_RETRIES}...")
+            response_text = _call_groq_skill_extraction(client, text)
+            last_response = response_text
+
+            # Parse with robust cleanup
+            skills = _parse_json_safe(response_text)
+
+            if not isinstance(skills, list):
+                raise ValueError("AI did not return a valid list.")
+
+            result = [str(s).strip() for s in skills if str(s).strip()]
+
+            if result:
+                logger.info(f"[Skill Extraction] ✅ Success on attempt {attempt}. Extracted {len(result)} skills.")
+                return result
+            else:
+                logger.warning(f"[Skill Extraction] Attempt {attempt}: Empty result, retrying...")
+                last_error = ValueError("AI returned empty skills list")
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"[Skill Extraction] Attempt {attempt} parse error: {e}")
+            last_error = e
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY_SECONDS)
+            continue
+
+        except Exception as e:
+            err_str = str(e).lower()
+            # Critical errors — don't retry, raise immediately
+            if any(kw in err_str for kw in ["api_key", "invalid", "authentication", "unauthorized", "401"]):
+                logger.error(f"[Skill Extraction] ❌ Auth error (no retry): {e}")
+                raise
+            if any(kw in err_str for kw in ["network", "connection", "timeout", "dns"]):
+                logger.error(f"[Skill Extraction] ❌ Network error (no retry): {e}")
+                raise
+            if "429" in str(e) or "rate" in err_str:
+                logger.warning(f"[Skill Extraction] ⚠️ Rate limited on attempt {attempt}")
+                last_error = e
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_DELAY_SECONDS * 2)  # Longer delay for rate limits
+                continue
+
+            logger.warning(f"[Skill Extraction] Attempt {attempt} error: {e}")
+            last_error = e
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY_SECONDS)
+            continue
+
+    # All retries exhausted — try one last partial recovery from last response
+    if last_response:
+        logger.info("[Skill Extraction] All retries exhausted. Attempting final partial recovery...")
+        partial = _extract_partial_skills(last_response)
+        if partial:
+            logger.info(f"[Skill Extraction] ✅ Partial recovery: {len(partial)} skills from last response.")
+            return partial
+
+    # Truly failed
+    raise last_error or ValueError("AI skill extraction failed after all retries.")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -395,13 +568,11 @@ def extract_skills(
     """
     Main extraction function — tries AI first, falls back to rule-based.
 
-    Pattern:
-        try:
-            skills = extract_skills_ai(text)   ← LLaMA 3.1 via Groq
-            method = "AI"
-        except:
-            skills = extract_skills_fallback()  ← keyword matching
-            method = "Fallback"
+    Robust behavior:
+      - When simulate_failure=False: ALWAYS prioritizes AI with 3 retries
+        and JSON repair. Only falls back on true critical failures
+        (network down, API key invalid).
+      - When simulate_failure=True: Forces fallback mode.
 
     Post-processing:
         All results pass through _filter_and_deduplicate() to remove
@@ -419,6 +590,7 @@ def extract_skills(
 
     if simulate_failure:
         # Demo mode: force fallback
+        logger.info("[Extract] Simulate failure ON — using fallback.")
         raw_skills = extract_skills_fallback(text, all_skills)
         method = "Fallback"
         error_msg = "AI was intentionally skipped (simulate failure mode)."
@@ -426,19 +598,21 @@ def extract_skills(
         try:
             raw_skills = extract_skills_ai(text)
             method = "AI"
+            logger.info(f"[Extract] ✅ AI extraction successful. {len(raw_skills)} raw skills.")
         except Exception as e:
-            # AI failed — automatically switch to fallback
+            # AI truly failed after all retries — switch to fallback
+            logger.error(f"[Extract] ❌ AI failed after all retries: {e}. Switching to fallback.")
             raw_skills = extract_skills_fallback(text, all_skills)
             method = "Fallback"
             err_str = str(e)
             if "429" in err_str or "rate" in err_str.lower():
-                error_msg = "Groq API rate limit reached. Try again in a moment."
+                error_msg = "Groq API rate limit reached after retries. Try again in a moment."
             elif "api_key" in err_str.lower() or "invalid" in err_str.lower() or "authentication" in err_str.lower():
                 error_msg = "Invalid Groq API key. Check your .env file."
             elif "network" in err_str.lower() or "connection" in err_str.lower():
                 error_msg = "Network error — could not reach Groq API."
             else:
-                error_msg = f"AI extraction failed: {type(e).__name__}"
+                error_msg = f"AI extraction failed after {MAX_RETRIES} retries: {type(e).__name__}"
 
     # ── Post-processing: filter noise, deduplicate, normalize ──
     clean_skills = _filter_and_deduplicate(raw_skills, all_skills)

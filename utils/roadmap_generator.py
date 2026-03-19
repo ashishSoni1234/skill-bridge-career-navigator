@@ -540,36 +540,134 @@ from utils.gap_analyzer import get_skill_priority
 import os
 import re
 import json
+import logging
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 1
+
 
 # ═══════════════════════════════════════════════════════════════════
-# AI ROADMAP GENERATION (PRIMARY)
+# JSON CLEANUP UTILITIES (for roadmap responses)
 # ═══════════════════════════════════════════════════════════════════
 
-def generate_roadmap_ai(
-    missing_skills: list[str],
-    target_role: str,
-    experience_level: str = "beginner",
-) -> list[dict]:
+def _clean_roadmap_json(response_text: str) -> str:
     """
-    PRIMARY: Generates a personalized roadmap using LLaMA 3.1 via Groq.
+    Clean/repair a potentially malformed JSON response from AI for roadmaps.
 
-    Sends missing skills, target role, and experience level to the LLM
-    and asks for a week-by-week learning plan with actionable steps.
-
-    Raises an exception on failure so the caller can fall back.
+    Steps:
+      1. Strip whitespace
+      2. Remove markdown code fences
+      3. Extract JSON array substring
+      4. Fix trailing commas
+      5. Remove non-printable characters
     """
-    from groq import Groq
+    text = response_text.strip()
 
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key or api_key == "your_groq_api_key_here":
-        raise ValueError("GROQ_API_KEY is not configured.")
+    # Remove markdown code fences
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
 
-    client = Groq(api_key=api_key)
+    # Extract JSON array substring
+    bracket_start = text.find("[")
+    bracket_end = text.rfind("]")
+    if bracket_start != -1 and bracket_end != -1 and bracket_end > bracket_start:
+        text = text[bracket_start:bracket_end + 1]
 
+    # Fix trailing commas
+    text = re.sub(r",\s*]", "]", text)
+    text = re.sub(r",\s*}", "}", text)
+
+    # Remove non-printable characters (except newlines/tabs)
+    text = re.sub(r"[^\x20-\x7E\n\t]", "", text)
+
+    return text
+
+
+def _parse_roadmap_json_safe(response_text: str) -> list[dict]:
+    """
+    Parse AI roadmap response with multiple cleanup strategies.
+
+    Returns parsed list of dicts on success, raises ValueError on failure.
+    """
+    raw = response_text.strip()
+    logger.info(f"[Roadmap AI Response] (first 300 chars): {raw[:300]}")
+
+    # Strategy 1: Direct parse
+    try:
+        result = json.loads(raw)
+        if isinstance(result, list) and len(result) > 0:
+            logger.info("[Roadmap Parse] Strategy 1 (direct) succeeded.")
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Clean and parse
+    cleaned = _clean_roadmap_json(raw)
+    try:
+        result = json.loads(cleaned)
+        if isinstance(result, list) and len(result) > 0:
+            logger.info("[Roadmap Parse] Strategy 2 (cleaned) succeeded.")
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 3: Regex extract JSON array
+    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    if match:
+        try:
+            result = json.loads(match.group())
+            if isinstance(result, list) and len(result) > 0:
+                logger.info("[Roadmap Parse] Strategy 3 (regex extract) succeeded.")
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 4: Try to recover partial roadmap entries
+    partial = _extract_partial_roadmap(raw)
+    if partial:
+        logger.info(f"[Roadmap Parse] Strategy 4 (partial recovery) extracted {len(partial)} entries.")
+        return partial
+
+    raise ValueError("Could not parse AI roadmap response after all cleanup strategies.")
+
+
+def _extract_partial_roadmap(text: str) -> list[dict]:
+    """
+    Last-resort: extract individual roadmap entries from malformed response.
+    Looks for patterns like {"week": N, "skill": "...", "steps": [...]}
+    """
+    entries = []
+    # Try to find individual JSON objects with week/skill/steps
+    pattern = r'\{[^{}]*"week"\s*:\s*\d+[^{}]*"skill"\s*:\s*"[^"]*"[^{}]*"steps"\s*:\s*\[[^\]]*\][^{}]*\}'
+    matches = re.findall(pattern, text, re.DOTALL)
+    for m in matches:
+        try:
+            entry = json.loads(m)
+            if isinstance(entry, dict) and "skill" in entry:
+                entries.append(entry)
+        except json.JSONDecodeError:
+            continue
+
+    return entries
+
+
+# ═══════════════════════════════════════════════════════════════════
+# AI ROADMAP GENERATION (PRIMARY) — with retry + robust parsing
+# ═══════════════════════════════════════════════════════════════════
+
+def _call_groq_roadmap(client, missing_skills, target_role, experience_level) -> str:
+    """
+    Make a single API call to Groq for roadmap generation.
+    Returns the raw response text.
+    """
     skills_list = ", ".join(missing_skills)
 
     prompt = (
@@ -583,7 +681,7 @@ def generate_roadmap_ai(
         f"- Tailor difficulty to {experience_level} level\n"
         "- Return ONLY a valid JSON array with this format:\n"
         '[{"week": 1, "skill": "SkillName", "steps": ["step1", "step2", "step3"]}, ...]\n'
-        "- No markdown, no explanation, no code fences — just the JSON array."
+        "- Return ONLY valid JSON. No explanation. No text. No markdown. No code fences."
     )
 
     chat_completion = client.chat.completions.create(
@@ -592,7 +690,8 @@ def generate_roadmap_ai(
                 "role": "system",
                 "content": (
                     "You are a career learning roadmap generator. "
-                    "Return ONLY a valid JSON array. No markdown, no explanation."
+                    "Return ONLY a valid JSON array. No markdown, no explanation. "
+                    'Example output: [{"week": 1, "skill": "Python", "steps": ["step1", "step2", "step3"]}]'
                 ),
             },
             {"role": "user", "content": prompt},
@@ -602,36 +701,120 @@ def generate_roadmap_ai(
         max_tokens=2048,
     )
 
-    response_text = chat_completion.choices[0].message.content.strip()
+    return chat_completion.choices[0].message.content.strip()
 
-    # Clean markdown code fences if present
-    if response_text.startswith("```"):
-        response_text = re.sub(r"^```(?:json)?\s*", "", response_text)
-        response_text = re.sub(r"\s*```$", "", response_text)
 
-    roadmap = json.loads(response_text)
+def generate_roadmap_ai(
+    missing_skills: list[str],
+    target_role: str,
+    experience_level: str = "beginner",
+) -> list[dict]:
+    """
+    PRIMARY: Generates a personalized roadmap using LLaMA 3.1 via Groq.
 
-    if not isinstance(roadmap, list) or len(roadmap) == 0:
-        raise ValueError("LLM did not return a valid roadmap list.")
+    Features:
+      - 3 retry attempts before giving up
+      - Robust JSON cleanup and parsing
+      - Partial result recovery from malformed responses
+      - Detailed logging for debugging
 
-    # Add priority to each entry
-    result = []
-    for entry in roadmap:
-        skill = entry.get("skill", "Unknown")
-        steps = entry.get("steps", [])
-        if not isinstance(steps, list) or len(steps) == 0:
+    Raises an exception ONLY on critical failures (network, auth).
+    """
+    from groq import Groq
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key or api_key == "your_groq_api_key_here":
+        raise ValueError("GROQ_API_KEY is not configured.")
+
+    client = Groq(api_key=api_key)
+
+    last_error = None
+    last_response = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            logger.info(f"[Roadmap Generation] Attempt {attempt}/{MAX_RETRIES}...")
+            response_text = _call_groq_roadmap(client, missing_skills, target_role, experience_level)
+            last_response = response_text
+
+            # Parse with robust cleanup
+            roadmap = _parse_roadmap_json_safe(response_text)
+
+            if not isinstance(roadmap, list) or len(roadmap) == 0:
+                raise ValueError("LLM did not return a valid roadmap list.")
+
+            # Add priority to each entry
+            result = []
+            for entry in roadmap:
+                skill = entry.get("skill", "Unknown")
+                steps = entry.get("steps", [])
+                if not isinstance(steps, list) or len(steps) == 0:
+                    continue
+                result.append({
+                    "week": entry.get("week", len(result) + 1),
+                    "skill": skill,
+                    "steps": [str(s) for s in steps],
+                    "priority": get_skill_priority(skill),
+                })
+
+            if result:
+                logger.info(f"[Roadmap Generation] ✅ Success on attempt {attempt}. {len(result)} weeks generated.")
+                return result
+            else:
+                logger.warning(f"[Roadmap Generation] Attempt {attempt}: Empty result after processing, retrying...")
+                last_error = ValueError("LLM roadmap was empty after processing.")
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"[Roadmap Generation] Attempt {attempt} parse error: {e}")
+            last_error = e
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY_SECONDS)
             continue
-        result.append({
-            "week": entry.get("week", len(result) + 1),
-            "skill": skill,
-            "steps": [str(s) for s in steps],
-            "priority": get_skill_priority(skill),
-        })
 
-    if not result:
-        raise ValueError("LLM roadmap was empty after processing.")
+        except Exception as e:
+            err_str = str(e).lower()
+            # Critical errors — don't retry, raise immediately
+            if any(kw in err_str for kw in ["api_key", "invalid", "authentication", "unauthorized", "401"]):
+                logger.error(f"[Roadmap Generation] ❌ Auth error (no retry): {e}")
+                raise
+            if any(kw in err_str for kw in ["network", "connection", "timeout", "dns"]):
+                logger.error(f"[Roadmap Generation] ❌ Network error (no retry): {e}")
+                raise
+            if "429" in str(e) or "rate" in err_str:
+                logger.warning(f"[Roadmap Generation] ⚠️ Rate limited on attempt {attempt}")
+                last_error = e
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_DELAY_SECONDS * 2)
+                continue
 
-    return result
+            logger.warning(f"[Roadmap Generation] Attempt {attempt} error: {e}")
+            last_error = e
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY_SECONDS)
+            continue
+
+    # All retries exhausted — try partial recovery from last response
+    if last_response:
+        logger.info("[Roadmap Generation] All retries exhausted. Attempting final partial recovery...")
+        partial = _extract_partial_roadmap(last_response)
+        if partial:
+            result = []
+            for entry in partial:
+                skill = entry.get("skill", "Unknown")
+                steps = entry.get("steps", [])
+                if steps:
+                    result.append({
+                        "week": entry.get("week", len(result) + 1),
+                        "skill": skill,
+                        "steps": [str(s) for s in steps],
+                        "priority": get_skill_priority(skill),
+                    })
+            if result:
+                logger.info(f"[Roadmap Generation] ✅ Partial recovery: {len(result)} weeks from last response.")
+                return result
+
+    # Truly failed
+    raise last_error or ValueError("AI roadmap generation failed after all retries.")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -700,13 +883,11 @@ def generate_roadmap(
     """
     Main roadmap generation — tries AI first, falls back to rule-based.
 
-    Pattern:
-        try:
-            roadmap = generate_roadmap_ai(...)   ← LLaMA 3.1 via Groq
-            method = "AI"
-        except:
-            roadmap = generate_roadmap_fallback(...)  ← SKILL_ROADMAPS dict
-            method = "Fallback"
+    Robust behavior:
+      - When simulate_failure=False: ALWAYS prioritizes AI with 3 retries
+        and JSON repair. Only falls back on true critical failures
+        (network down, API key invalid).
+      - When simulate_failure=True: Forces fallback mode.
 
     Args:
         missing_skills: Skills the user needs to learn.
@@ -723,6 +904,7 @@ def generate_roadmap(
     error_msg = ""
 
     if simulate_failure:
+        logger.info("[Roadmap] Simulate failure ON — using fallback.")
         roadmap = generate_roadmap_fallback(missing_skills, experience_level)
         method = "Fallback"
         error_msg = "AI was intentionally skipped (simulate failure mode)."
@@ -730,14 +912,20 @@ def generate_roadmap(
         try:
             roadmap = generate_roadmap_ai(missing_skills, target_role, experience_level)
             method = "AI"
+            logger.info(f"[Roadmap] ✅ AI roadmap successful. {len(roadmap)} weeks.")
         except Exception as e:
+            logger.error(f"[Roadmap] ❌ AI failed after all retries: {e}. Switching to fallback.")
             roadmap = generate_roadmap_fallback(missing_skills, experience_level)
             method = "Fallback"
             err_str = str(e)
             if "429" in err_str or "rate" in err_str.lower():
-                error_msg = "Groq API rate limit — using pre-defined roadmap steps."
+                error_msg = "Groq API rate limit after retries — using pre-defined roadmap steps."
+            elif "api_key" in err_str.lower() or "invalid" in err_str.lower() or "authentication" in err_str.lower():
+                error_msg = "Invalid Groq API key. Check your .env file."
+            elif "network" in err_str.lower() or "connection" in err_str.lower():
+                error_msg = "Network error — could not reach Groq API."
             else:
-                error_msg = f"AI roadmap generation failed: {type(e).__name__}"
+                error_msg = f"AI roadmap generation failed after {MAX_RETRIES} retries: {type(e).__name__}"
 
     return roadmap, method, error_msg
 
