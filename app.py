@@ -24,6 +24,7 @@ from utils.gap_analyzer import (
     detect_experience_level,
 )
 from utils.roadmap_generator import generate_roadmap
+from utils.skill_matcher import get_match_method_label
 
 # ── Page Configuration ──────────────────────────────────────────────
 st.set_page_config(
@@ -296,6 +297,18 @@ if analyze_clicked:
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════
+    # SKILL MATCHING METHOD LABEL
+    # ═══════════════════════════════════════════════════════════════
+    st.markdown(
+        f"<div style='background: linear-gradient(135deg, #e8f5e9 0%, #e3f2fd 50%, #f3e5f5 100%); "
+        f"padding: 0.75rem 1.25rem; border-radius: 0.75rem; margin-bottom: 1rem; "
+        f"border: 1px solid #c8e6c9; display: inline-block;'>"
+        f"{get_match_method_label()}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ═══════════════════════════════════════════════════════════════
     # 2. SKILL SEARCH (filter detected skills)
     # ═══════════════════════════════════════════════════════════════
     skill_search = st.text_input(
@@ -418,11 +431,22 @@ if analyze_clicked:
         st.metric("Match", f"{gap_result['match_percentage']}%")
 
     if gap_result["matched"]:
-        matched_tags = " ".join(
-            f"<span class='skill-tag skill-tag-matched'>✔ {s['skill']}</span>"
-            for s in gap_result["matched"]
-        )
-        st.markdown(f"**Matched:** {matched_tags}", unsafe_allow_html=True)
+        # Show enriched match info with match type badges
+        match_tags = []
+        for s in gap_result["matched"]:
+            match_type = s.get("match_type", "exact")
+            matched_by = s.get("matched_by", s["skill"])
+            # Color-code by match type
+            if match_type == "category_satisfaction":
+                badge = f"<span class='skill-tag skill-tag-matched'>✔ {s['skill']} <small style='opacity:0.7'>(via {matched_by})</small></span>"
+            elif match_type == "synonym":
+                badge = f"<span class='skill-tag skill-tag-matched'>✔ {s['skill']}</span>"
+            elif match_type == "semantic":
+                badge = f"<span class='skill-tag skill-tag-matched'>✔ {s['skill']} <small style='opacity:0.7'>(≈ {matched_by})</small></span>"
+            else:
+                badge = f"<span class='skill-tag skill-tag-matched'>✔ {s['skill']}</span>"
+            match_tags.append(badge)
+        st.markdown(f"**Matched:** {' '.join(match_tags)}", unsafe_allow_html=True)
 
     # ═══════════════════════════════════════════════════════════════
     # SECTION 6: READINESS SUMMARY

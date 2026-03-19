@@ -4,13 +4,23 @@ Gap Analyzer Module
 Compares user's detected skills against required skills for a target role.
 
 Features:
-  - Correct match percentage: (intersection / total_required) * 100
+  - Intelligent skill matching via Semantic + Rule-Based Normalization
+  - Synonym/alias resolution (e.g. GitHub → git, MySQL → sql)
+  - Programming language flexibility (any one lang satisfies all lang requirements)
+  - Category-based satisfaction (e.g. MySQL satisfies SQL requirement)
+  - Correct match percentage: (matched / total_required) * 100
   - Priority classification: 🔴 High / 🟡 Medium / 🟢 Low for missing skills
   - Readiness summary with human-readable message
   - Prioritized skill ordering for logical learning path
   - Next-step guidance
   - Experience level detection (beginner vs advanced)
 """
+
+from utils.skill_matcher import (
+    match_skills,
+    normalize_skill,
+    get_match_method_label,
+)
 
 # ═══════════════════════════════════════════════════════════════════
 # PRIORITY CLASSIFICATION
@@ -131,53 +141,63 @@ SKILL_PRIORITY_ORDER = [
 
 def analyze_gap(user_skills: list[str], required_skills: list[str]) -> dict:
     """
-    Performs skill gap analysis with priority classification.
+    Performs skill gap analysis using intelligent semantic matching.
+
+    Uses the skill_matcher module for:
+      - Synonym/alias resolution (GitHub → git, MySQL → sql)
+      - Programming language flexibility (Python satisfies Java requirement)
+      - Category-based satisfaction (databases, version control)
+      - Substring/token matching ("Algorithm Design & Analysis" ↔ "Algorithms")
 
     Correctly computes:
         match_percentage = (len(matched) / len(required_skills)) * 100
 
     Returns:
         {
-            "matched": [{"skill": "Python", "priority": "high"}, ...],
+            "matched": [{"skill": "Python", "priority": "high", "matched_by": "...", "match_type": "..."}, ...],
             "missing": [{"skill": "Docker", "priority": "high"}, ...],
-            "match_percentage": 50.0,
+            "match_percentage": 75.0,
             "matched_list": ["Python", ...],
             "missing_list": ["Docker", ...],
+            "match_method": "Semantic + Rule-Based Normalization",
         }
     """
-    # Normalize to lowercase for comparison
-    user_set = {s.strip().lower() for s in user_skills if s.strip()}
-    required_set = {s.strip().lower() for s in required_skills if s.strip()}
+    # Use the intelligent skill matcher
+    result = match_skills(user_skills, required_skills)
 
-    matched_lower = user_set & required_set
-    missing_lower = required_set - user_set
-
-    # Map back to original casing from required_skills
-    required_map = {s.strip().lower(): s.strip() for s in required_skills}
-
-    matched = [required_map[s] for s in matched_lower if s in required_map]
-    missing = [required_map[s] for s in missing_lower if s in required_map]
-
-    # Correct percentage: intersection / total_required * 100
-    total = len(required_set)
-    match_percentage = round((len(matched) / total) * 100, 1) if total > 0 else 0.0
-
-    # Add priority classification
+    # Add priority classification to matched skills
     matched_with_priority = sorted(
-        [{"skill": s, "priority": get_skill_priority(s)} for s in matched],
+        [
+            {
+                "skill": m["skill"],
+                "priority": get_skill_priority(m["skill"]),
+                "matched_by": m.get("matched_by", m["skill"]),
+                "match_type": m.get("match_type", "exact"),
+            }
+            for m in result["matched"]
+        ],
         key=lambda x: ({"high": 0, "medium": 1, "low": 2}[x["priority"]], x["skill"]),
     )
+
+    # Add priority classification to missing skills
     missing_with_priority = sorted(
-        [{"skill": s, "priority": get_skill_priority(s)} for s in missing],
+        [
+            {
+                "skill": m["skill"],
+                "priority": get_skill_priority(m["skill"]),
+            }
+            for m in result["missing"]
+        ],
         key=lambda x: ({"high": 0, "medium": 1, "low": 2}[x["priority"]], x["skill"]),
     )
 
     return {
         "matched": matched_with_priority,
         "missing": missing_with_priority,
-        "match_percentage": match_percentage,
-        "matched_list": sorted(matched),
-        "missing_list": sorted(missing),
+        "match_percentage": result["match_percentage"],
+        "matched_list": result["matched_list"],
+        "missing_list": result["missing_list"],
+        "match_method": result.get("method", "Semantic + Rule-Based Normalization"),
     }
 
 
